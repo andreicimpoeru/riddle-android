@@ -23,9 +23,10 @@ Your mileage may vary with other Boox models, firmware versions, or vision model
 ## Features
 
 - Full-screen ink canvas with stylus pressure and eraser
-- Onyx Boox `TouchHelper` integration (MotionEvent fallback on other devices)
+- Onyx Boox native pen render + batched e-ink refresh (lower writing latency)
 - Two-step oracle: handwriting OCR, then text reply
-- OpenAI-compatible API (OpenAI, Ollama, vLLM, LocalAI, OpenRouter, etc.)
+- Reasoning-model friendly (`reasoning_effort: none`, higher token budget for Gemma 4 etc.)
+- OpenAI-compatible API (OpenAI, Ollama, LM Studio, vLLM, LocalAI, OpenRouter, etc.)
 - Animated reply in Dancing Script (Zhang–Suen stroke tracing)
 
 ## Requirements

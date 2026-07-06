@@ -45,7 +45,7 @@ class OracleClient(
             put(message("system", OCR_SYSTEM))
             put(visionUserMessage(OCR_USER_PROMPT, pngBytes))
         }
-        return complete(messages, maxTokens = 1024, label = "OCR")
+        return complete(messages, maxTokens = OCR_MAX_TOKENS, label = "OCR")
     }
 
     private fun reply(transcription: String): Result<String> {
@@ -53,7 +53,7 @@ class OracleClient(
             put(message("system", PERSONA))
             put(message("user", transcription))
         }
-        return complete(messages, maxTokens = 512, label = "reply")
+        return complete(messages, maxTokens = REPLY_MAX_TOKENS, label = "reply")
     }
 
     private fun complete(messages: JSONArray, maxTokens: Int, label: String): Result<String> {
@@ -75,6 +75,9 @@ class OracleClient(
                 put("stream", stream)
                 put("max_tokens", maxTokens)
                 put("messages", messages)
+                // Reasoning models (Gemma 4, etc.) otherwise spend the entire
+                // budget on reasoning_content and return a truncated visible reply.
+                put("reasoning_effort", "none")
             }
             client.newCall(buildRequest(body)).execute().use { response ->
                 if (!response.isSuccessful) {
@@ -166,8 +169,12 @@ class OracleClient(
         if (raw.isBlank()) return ""
         return try {
             val json = JSONObject(raw)
-            json.optJSONArray("choices")
-                ?.optJSONObject(0)
+            val choice = json.optJSONArray("choices")?.optJSONObject(0)
+            val finish = choice?.optString("finish_reason").orEmpty()
+            if (finish == "length") {
+                Log.w(TAG, "model reply truncated (finish_reason=length); raise max_tokens or disable reasoning")
+            }
+            choice
                 ?.optJSONObject("message")
                 ?.optString("content")
                 .orEmpty()
@@ -180,9 +187,14 @@ class OracleClient(
     companion object {
         private const val TAG = "OracleClient"
 
+        // Reasoning models must not burn tokens on hidden chain-of-thought.
+        private const val REPLY_MAX_TOKENS = 2048
+        private const val OCR_MAX_TOKENS = 1024
+
         private const val OCR_SYSTEM =
             "You are a handwriting transcription engine. Your only job is to read handwritten text " +
-                "from images and output the exact words you see.\n\n" +
+                "from images and output the exact words you see. Do not reason or plan aloud — " +
+                "output only the final transcription.\n\n" +
                 "Rules:\n" +
                 "- The image shows black ink handwriting on a white page.\n" +
                 "- Read every line, top to bottom, left to right.\n" +
@@ -197,6 +209,7 @@ class OracleClient(
 
         private const val PERSONA =
             "You are a helpful assistant. Reply concisely and directly to the user's message. " +
-                "Use the same language as the user."
+                "Use the same language as the user. Do not use internal reasoning or planning — " +
+                "write the complete final reply immediately."
     }
 }

@@ -8,7 +8,7 @@ Inspired by the reMarkable Paper Pro diary demo — rebuilt for Boox with Onyx p
 
 Pre-built APK for quick testing (no compiler needed):
 
-**[Download Riddle Diary.apk](https://github.com/andreicimpoeru/riddle-android/releases/latest/download/Riddle%20Diary.apk)** (latest release)
+**[Download Riddle Diary (APK)](https://github.com/andreicimpoeru/riddle-android/releases/latest/download/Riddle-Diary.apk)** (latest release)
 
 Sideload to your Boox, then configure your API settings in the app.
 
@@ -38,7 +38,7 @@ For building from source: Android Studio or Android SDK (API 34).
 
 ## Quick start (Boox)
 
-1. Download **Riddle Diary.apk** from [Releases](https://github.com/andreicimpoeru/riddle-android/releases/latest).
+1. Download **Riddle Diary** (`Riddle-Diary.apk`) from [Releases](https://github.com/andreicimpoeru/riddle-android/releases/latest).
 2. Install on your Boox (enable sideloading / unknown sources if needed).
 3. Open **The Diary** settings and configure:
    - **API base** — e.g. `http://192.168.1.50:11434/v1` (Ollama on your LAN)

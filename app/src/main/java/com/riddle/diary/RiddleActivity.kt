@@ -54,11 +54,14 @@ class RiddleActivity : AppCompatActivity() {
         oracle = OracleClient(store.apiKey, store.apiBase, store.apiModel)
         eink = EinkHelper(binding.inkCanvas)
 
-        binding.inkCanvas.onInkChanged = { rect -> eink.refreshRegion(rect, fast = true) }
+        binding.inkCanvas.onInkChanged = { rect -> eink.queueRefresh(rect, fast = true) }
 
-        pen = PenController(binding.inkCanvas) { sample ->
-            handlePenSample(sample)
-        }
+        pen = PenController(
+            view = binding.inkCanvas,
+            onSample = { sample -> handlePenSample(sample) },
+            onStrokeStart = { eink.enterPenMode() },
+            onStrokeEnd = { erasing -> commitLiveStroke(erasing) },
+        )
 
         binding.inkCanvas.setOnTouchListener { _, event ->
             pen.onTouchEvent(event)
@@ -91,6 +94,7 @@ class RiddleActivity : AppCompatActivity() {
             if (penDown) {
                 penDown = false
                 binding.inkCanvas.penUp()
+                eink.leavePenMode()
                 if (state is DiaryState.Listening) {
                     state = DiaryState.Listening(lastPenUpAt = SystemClock.elapsedRealtime())
                 }
@@ -101,18 +105,35 @@ class RiddleActivity : AppCompatActivity() {
         when (val current = state) {
             is DiaryState.Listening -> {
                 penDown = true
-                val dirty = if (sample.erasing) {
-                    binding.inkCanvas.erasePoint(sample.x, sample.y)
+                if (pen.nativeRenderActive) {
+                    if (sample.erasing) {
+                        binding.inkCanvas.recordErasePoint(sample.x, sample.y)
+                    } else {
+                        binding.inkCanvas.recordPenPoint(sample.x, sample.y, sample.pressure)
+                    }
                 } else {
-                    binding.inkCanvas.penPoint(sample.x, sample.y, sample.pressure)
+                    val dirty = if (sample.erasing) {
+                        binding.inkCanvas.erasePoint(sample.x, sample.y)
+                    } else {
+                        binding.inkCanvas.penPoint(sample.x, sample.y, sample.pressure)
+                    }
+                    eink.queueRefresh(dirty, fast = true)
                 }
-                eink.refreshRegion(dirty, fast = true)
                 state = DiaryState.Listening(lastPenUpAt = SystemClock.elapsedRealtime())
             }
             is DiaryState.Lingering -> {
                 state = DiaryState.FadingReply(0, SystemClock.elapsedRealtime(), current.region)
             }
             else -> Unit
+        }
+    }
+
+    private fun commitLiveStroke(erasing: Boolean) {
+        if (!pen.nativeRenderActive) return
+        val dirty = binding.inkCanvas.commitRecordedStroke(erasing)
+        if (!dirty.isEmpty) {
+            eink.queueRefresh(dirty, fast = true)
+            eink.flush(fast = true)
         }
     }
 
@@ -147,7 +168,7 @@ class RiddleActivity : AppCompatActivity() {
             is DiaryState.Drinking -> {
                 if (now >= s.nextAt) {
                     binding.inkCanvas.dissolvePass(s.region, s.stage, drinkStages)
-                    eink.refreshRegion(s.region.rect(), fast = true)
+                    eink.queueRefresh(s.region.rect(), fast = true)
                     if (s.stage + 1 >= drinkStages) {
                         binding.inkCanvas.clearInkData()
                         DiaryState.Thinking(now)
@@ -200,7 +221,7 @@ class RiddleActivity : AppCompatActivity() {
                         plan.pointIndex++
                         budget--
                     }
-                    if (!dirty.isEmpty()) eink.refreshRegion(dirty.rect(), fast = true)
+                    if (!dirty.isEmpty()) eink.queueRefresh(dirty.rect(), fast = true)
 
                     if (plan.strokeIndex >= plan.strokes.size) {
                         val chars = plan.strokes.sumOf { it.size }
@@ -221,7 +242,7 @@ class RiddleActivity : AppCompatActivity() {
             is DiaryState.FadingReply -> {
                 if (now >= s.nextAt) {
                     binding.inkCanvas.dissolvePass(s.region, s.stage, fadeStages)
-                    eink.refreshRegion(s.region.rect(), fast = true)
+                    eink.queueRefresh(s.region.rect(), fast = true)
                     if (s.stage + 1 >= fadeStages) {
                         eink.fullRefresh()
                         DiaryState.Listening()

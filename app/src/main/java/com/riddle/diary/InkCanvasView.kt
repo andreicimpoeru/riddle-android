@@ -17,11 +17,8 @@ class InkCanvasView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
 ) : View(context, attrs) {
-    private val pagePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        style = Paint.Style.FILL
-    }
-    private val inkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val inkPaint = Paint().apply {
+        isAntiAlias = false
         color = Color.BLACK
         style = Paint.Style.FILL
         strokeCap = Paint.Cap.ROUND
@@ -34,14 +31,19 @@ class InkCanvasView @JvmOverloads constructor(
 
     private val strokes = mutableListOf<MutableList<Triple<Int, Int, Int>>>()
     private var currentStroke = mutableListOf<Triple<Int, Int, Int>>()
+    private var currentErase = mutableListOf<Pair<Int, Int>>()
     private var lastErase: Pair<Int, Int>? = null
     val inkBounds = BoundingBox()
 
     var onInkChanged: ((Rect) -> Unit)? = null
 
+    init {
+        setLayerType(LAYER_TYPE_HARDWARE, null)
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        bitmap = Bitmap.createBitmap(max(1, w), max(1, h), Bitmap.Config.ARGB_8888)
+        bitmap = Bitmap.createBitmap(max(1, w), max(1, h), Bitmap.Config.RGB_565)
         canvas = Canvas(bitmap!!)
         clearPage()
     }
@@ -58,6 +60,61 @@ class InkCanvasView @JvmOverloads constructor(
     fun hasInk(): Boolean = strokes.isNotEmpty() || currentStroke.isNotEmpty()
 
     fun strokeList(): List<List<Triple<Int, Int, Int>>> = strokes
+
+    /** Record pen position during live drawing (no bitmap work). */
+    fun recordPenPoint(x: Float, y: Float, pressure: Float) {
+        val ix = x.roundToInt()
+        val iy = y.roundToInt()
+        val radius = (2f + pressure * 3f).roundToInt().coerceAtLeast(2)
+        currentStroke.add(Triple(ix, iy, radius))
+        inkBounds.add(ix, iy, radius + 2)
+    }
+
+    /** Record eraser position during live drawing (no bitmap work). */
+    fun recordErasePoint(x: Float, y: Float) {
+        val ix = x.roundToInt()
+        val iy = y.roundToInt()
+        currentErase.add(ix to iy)
+    }
+
+    /** Commit the recorded stroke to the bitmap (call on pen-up). */
+    fun commitRecordedStroke(erasing: Boolean): Rect {
+        val dirty = BoundingBox()
+        val c = canvas ?: return Rect()
+        if (erasing) {
+            var prev: Pair<Int, Int>? = null
+            for ((x, y) in currentErase) {
+                if (prev != null) {
+                    drawLine(c, prev.first, prev.second, x, y, 22, erasePaint)
+                    dirty.add(prev.first, prev.second, 24)
+                } else {
+                    stamp(c, x, y, 22, erasePaint)
+                }
+                dirty.add(x, y, 24)
+                prev = x to y
+            }
+            currentErase.clear()
+        } else {
+            if (currentStroke.isEmpty()) return Rect()
+            var prev: Triple<Int, Int, Int>? = null
+            for ((x, y, r) in currentStroke) {
+                if (prev != null) {
+                    drawLine(c, prev.first, prev.second, x, y, max(r, prev.third + 1), inkPaint)
+                    dirty.add(prev.first, prev.second, prev.third + 2)
+                } else {
+                    stamp(c, x, y, r, inkPaint)
+                }
+                dirty.add(x, y, r + 2)
+                prev = Triple(x, y, r)
+            }
+            strokes.add(currentStroke)
+            currentStroke = mutableListOf()
+        }
+        lastErase = null
+        if (dirty.isEmpty()) return Rect()
+        postDirty(dirty.rect(), notify = true)
+        return dirty.rect()
+    }
 
     fun penPoint(x: Float, y: Float, pressure: Float): Rect {
         val ix = x.roundToInt()
@@ -108,6 +165,7 @@ class InkCanvasView @JvmOverloads constructor(
     fun clearInkData() {
         strokes.clear()
         currentStroke.clear()
+        currentErase.clear()
         lastErase = null
         inkBounds.clear()
     }
@@ -193,9 +251,9 @@ class InkCanvasView @JvmOverloads constructor(
         bitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
     }
 
-    private fun postDirty(rect: Rect) {
+    private fun postDirty(rect: Rect, notify: Boolean = true) {
         invalidate(rect)
-        onInkChanged?.invoke(rect)
+        if (notify) onInkChanged?.invoke(rect)
     }
 
     private fun stamp(c: Canvas, x: Int, y: Int, r: Int, paint: Paint) {
